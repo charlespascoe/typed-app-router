@@ -3,6 +3,7 @@ import { EventWithArg } from 'typed-event';
 
 export class Navigation {
   constructor(
+    public url: string,
     public path: string,
     public params: { [key: string]: string },
     public query: { [key: string]: string },
@@ -31,11 +32,12 @@ export class Navigation {
       path = url;
     }
 
-    return new Navigation(path, {}, query);
+    return new Navigation(url, path, {}, query);
   }
 
   clone(): Navigation {
     return new Navigation(
+      this.url,
       this.path,
       Object.assign(this.params, {}),
       Object.assign(this.query, {}),
@@ -191,28 +193,98 @@ export class Subrouter extends BaseRouter implements IHandler {
 }
 
 
+export abstract class BrowserApi {
+  public readonly navigatedEvent = new EventWithArg<Navigation>();
+
+  public abstract setUrl(nav: Navigation): void;
+
+  public static create(): BrowserApi {
+    if (window.history && typeof window.history.pushState === 'function') {
+      return new Html5BrowserApi();
+    } else {
+      return new FallbackBrowserApi();
+    }
+  }
+}
+
+
+export class Html5BrowserApi extends BrowserApi {
+  constructor() {
+    super();
+
+    window.onpopstate = (e) => {
+      this.navigatedEvent.emit(Navigation.createFromUrl(window.location.href.substr(window.location.origin.length)));
+    };
+  }
+
+  public setUrl(nav: Navigation) {
+    window.history.pushState({}, '', nav.url);
+  }
+}
+
+
+export class FallbackBrowserApi extends BrowserApi {
+  public setUrl(nav: Navigation) {
+    if (window.location.href.substr(window.location.origin.length) !== nav.url) {
+      window.location.href = nav.url;
+    }
+  }
+}
+
+
 export class Router extends BaseRouter {
   public readonly navigatedEvent = new EventWithArg<Navigation>();
 
   private _currentNav: Navigation | null = null;
 
+  private nextNav: Navigation | null = null;
+
   public get currentNav(): Navigation | null { return this._currentNav; }
+
+  private static _instance: Router | null = null;
+
+  public static get instance(): Router {
+    let router: Router;
+
+    if (Router._instance === null) {
+      router = Router.create();
+      Router._instance = router;
+    } else {
+      router = Router._instance;
+    }
+
+    return router;
+  }
+
+  constructor(private browserApi: BrowserApi) {
+    super();
+
+    this.browserApi.navigatedEvent.register((nav) => this.navigate(nav));
+  }
+
+  public static create(): Router {
+    return new Router(BrowserApi.create());
+  }
 
   private setCurrentNav(nav: Navigation) {
     this._currentNav = nav;
     this.navigatedEvent.emit(nav);
   }
 
-  private nextNav: Navigation | null = null;
-
-  public async navigate(url: string): Promise<boolean> {
+  public async navigate(url: Navigation | string): Promise<boolean> {
     if (this.rootRouterHandler === null) return false;
 
     if (this.nextNav !== null) {
       this.nextNav.cancelled = true;
     }
 
-    let nav = Navigation.createFromUrl(url);
+    let nav: Navigation;
+
+    if (typeof url === 'string') {
+      nav = Navigation.createFromUrl(url);
+    } else {
+      nav = url;
+    }
 
     this.nextNav = nav;
     let handled = await this.rootRouterHandler.route(nav, nav.path);
@@ -220,6 +292,7 @@ export class Router extends BaseRouter {
 
     if (handled && !nav.cancelled) {
       this.setCurrentNav(nav);
+      this.browserApi.setUrl(nav);
     }
 
     return handled;
