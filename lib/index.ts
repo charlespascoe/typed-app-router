@@ -164,7 +164,7 @@ export abstract class BaseRouter {
     );
   }
 
-  public router(path: string): Subrouter {
+  public subroute(path: string): Subrouter {
     let subrouter = new Subrouter();
     this.addRouterHandler(new RouterHandler(new PatternHandler(path, subrouter, false)));
     return subrouter;
