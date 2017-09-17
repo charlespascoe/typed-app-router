@@ -50,7 +50,7 @@ export class Navigation {
 }
 
 
-interface IHandler {
+export interface IHandler {
   route(nav: Navigation, subpath: string): Promise<boolean>;
 }
 
@@ -122,7 +122,7 @@ class CallbackHandler implements IHandler {
 }
 
 
-class RouterHandler implements IHandler {
+export class RouterHandler implements IHandler {
   public next: RouterHandler | null = null;
 
   constructor(private handler: IHandler) { }
