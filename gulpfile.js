@@ -10,9 +10,10 @@ const outputDir = './dist';
 
 const tsProject = ts.createProject({
   declaration: true,
-  baseUrl: srcDir,
+  baseUrl: '.',
   paths: {
-    'typed-app-router/*': ['*']
+    'typed-app-router/*': [srcDir + '/*'],
+    'browser-cookies': ['types/browser-cookies']
   },
   target: 'ES5',
   strict: true,
