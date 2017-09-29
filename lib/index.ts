@@ -1,4 +1,14 @@
 import { EventWithArg } from 'typed-event';
+import * as cookies from 'browser-cookies';
+import { PossiblyWeakMap } from 'typed-app-router/possibly-weak-map';
+
+
+const FALLBACK_COOKIE_KEY = '__app_history__';
+
+
+function currentPath() {
+  return window.location.href.substr(window.location.origin.length);
+}
 
 
 export class Navigation {
@@ -12,6 +22,8 @@ export class Navigation {
   ) { }
 
   static createFromUrl(url: string): Navigation {
+    url = encodeURI(url);
+
     let path: string = '',
         query: { [key: string]: string } = {};
 
@@ -53,6 +65,7 @@ export class Navigation {
 
 
 export interface IHandler {
+  // Returns true if the handler has handled the navigation, false otherwise
   route(nav: Navigation, subpath: string): Promise<boolean>;
 }
 
@@ -196,8 +209,6 @@ export class Subrouter extends BaseRouter implements IHandler {
 export abstract class BrowserApi {
   public readonly navigatedEvent = new EventWithArg<Navigation>();
 
-  public abstract setUrl(nav: Navigation): void;
-
   public static create(): BrowserApi {
     if (window.history && typeof window.history.pushState === 'function') {
       return new Html5BrowserApi();
@@ -205,28 +216,109 @@ export abstract class BrowserApi {
       return new FallbackBrowserApi();
     }
   }
+
+  public abstract setUrl(nav: Navigation): void;
+
+  public abstract back(): void;
+
+  public abstract clearHistory(currentNav: Navigation): void;
 }
 
 
 export class Html5BrowserApi extends BrowserApi {
+  private prevNavs: PossiblyWeakMap<Navigation> = PossiblyWeakMap.create<Navigation>();
+
   constructor() {
     super();
 
     window.onpopstate = (e) => {
-      this.navigatedEvent.emit(Navigation.createFromUrl(window.location.href.substr(window.location.origin.length)));
+      if (typeof e.state.id === 'string') {
+        let nav: Navigation | undefined = this.prevNavs.get(e.state.id);
+
+        if (nav !== undefined) {
+          this.navigatedEvent.emit(nav);
+          return;
+        }
+      }
+
+      this.navigatedEvent.emit(Navigation.createFromUrl(currentPath()));
     };
   }
 
   public setUrl(nav: Navigation) {
-    window.history.pushState({}, '', nav.url);
+    let id = this.genId();
+    this.prevNavs.set(id, nav);
+    window.history.pushState({id}, '', nav.url);
+  }
+
+  public back() {
+    window.history.back();
+  }
+
+  public clearHistory(currentNav: Navigation) {
+    this.prevNavs = PossiblyWeakMap.create<Navigation>();
+    let id = this.genId();
+    this.prevNavs.set(id, currentNav);
+    window.history.replaceState({id}, '', currentNav.url);
+  }
+
+  private genId(): string {
+    let id: string;
+
+    do {
+      id = `${Date.now().toFixed()}-${Math.floor(Math.random() * 1000000000).toFixed()}`;
+    } while (this.prevNavs.has(id));
+
+    return id;
   }
 }
 
 
 export class FallbackBrowserApi extends BrowserApi {
   public setUrl(nav: Navigation) {
-    if (window.location.href.substr(window.location.origin.length) !== nav.url) {
+    if (currentPath() !== nav.url) {
+      let hist = this.getHistory();
+
+      hist.push(currentPath());
+
+      this.setHistory(hist);
+
       window.location.href = nav.url;
+    }
+  }
+
+  public back() {
+    let hist = this.getHistory();
+
+    let url = hist.pop();
+
+    if (url !== undefined) {
+      this.setHistory(hist);
+
+      window.location.href = url;
+    }
+  }
+
+  public clearHistory() {
+    this.setHistory([]);
+  }
+
+  private getHistory(): string[] {
+    let histStr: string | null = cookies.get(FALLBACK_COOKIE_KEY),
+        hist: string[] = [];
+
+    if (histStr !== null) {
+      hist = histStr.split('|');
+    }
+
+    return hist;
+  }
+
+  private setHistory(hist: string[]) {
+    if (hist.length === 0) {
+      cookies.erase(FALLBACK_COOKIE_KEY);
+    } else {
+      cookies.set(FALLBACK_COOKIE_KEY, hist.join('|'));
     }
   }
 }
@@ -296,5 +388,15 @@ export class Router extends BaseRouter {
     }
 
     return handled;
+  }
+
+  public back() {
+    this.browserApi.back();
+  }
+
+  public clearHistory() {
+    if (this.currentNav !== null) {
+      this.browserApi.clearHistory(this.currentNav);
+    }
   }
 }
