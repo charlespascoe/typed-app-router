@@ -12,6 +12,8 @@ function currentPath() {
 
 
 export class Navigation {
+  public extras: {[key: string]: any} = {};
+
   constructor(
     public url: string,
     public path: string,
