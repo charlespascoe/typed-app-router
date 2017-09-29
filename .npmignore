@@ -1,0 +1,6 @@
+.npmignore
+lib/
+node_modules/
+gulpfile.js
+*.log
+types/
