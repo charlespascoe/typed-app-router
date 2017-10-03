@@ -6,7 +6,7 @@ import { PossiblyWeakMap } from './possibly-weak-map';
 const FALLBACK_COOKIE_KEY = '__app_history__';
 
 
-function currentPath() {
+export function currentPath(): string {
   return window.location.href.substr(window.location.origin.length);
 }
 
@@ -118,7 +118,7 @@ class PatternHandler implements IHandler {
       result.params = {};
 
       for (let i in this.keys) {
-        result.params[this.keys[i]] = match[(i + 1) as any];
+        result.params[this.keys[i]] = match[parseInt(i) + 1];
       }
 
       result.newSubpath = subpath.substr(match[0].length) || '/';
