@@ -6,7 +6,7 @@ import { PossiblyWeakMap } from './possibly-weak-map';
 const FALLBACK_COOKIE_KEY = '__app_history__';
 
 
-function currentPath() {
+export function currentPath(): string {
   return window.location.href.substr(window.location.origin.length);
 }
 
