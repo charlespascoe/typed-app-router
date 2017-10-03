@@ -1,6 +1,6 @@
 import { EventWithArg } from 'typed-event';
 import * as cookies from 'browser-cookies';
-import { PossiblyWeakMap } from 'typed-app-router/possibly-weak-map';
+import { PossiblyWeakMap } from './possibly-weak-map';
 
 
 const FALLBACK_COOKIE_KEY = '__app_history__';
