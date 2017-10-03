@@ -118,7 +118,7 @@ class PatternHandler implements IHandler {
       result.params = {};
 
       for (let i in this.keys) {
-        result.params[this.keys[i]] = match[(i + 1) as any];
+        result.params[this.keys[i]] = match[parseInt(i) + 1];
       }
 
       result.newSubpath = subpath.substr(match[0].length) || '/';
