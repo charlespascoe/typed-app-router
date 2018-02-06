@@ -1,8 +1,11 @@
 import { EventWithArg } from 'typed-event';
 import * as cookies from 'browser-cookies';
 import { PossiblyWeakMap } from './possibly-weak-map';
+import { keysOf } from './utils';
 import {
   conformsTo,
+  eachItem,
+  isArray,
   isString,
   validate,
   ValidationResult,
@@ -82,17 +85,25 @@ export abstract class BaseRouter<T> {
     }));
   }
 
-  public param<U>(validator: Validator<U>): Subrouter<T & U> {
+  public param<U>(validator: StringValidator<U>): Subrouter<T & U> {
     const subrouter = new Subrouter<T & U>();
 
     this.handlers.push(new ParamHandler(validator, subrouter));
 
     return subrouter;
   }
+
+  public multiparam<U>(validator: ArrayValidator<U>): Subrouter<T & U> {
+    const subrouter = new Subrouter<T & U>();
+
+    this.handlers.push(new MultiParamHandler(validator, subrouter));
+
+    return subrouter;
+  }
 }
 
 
-export class PathHandler<T> implements IHandler<T> {
+class PathHandler<T> implements IHandler<T> {
   private readonly pathComponents: string[];
 
   constructor(path: string, private readonly next: IHandler<T>) {
@@ -115,14 +126,14 @@ export class PathHandler<T> implements IHandler<T> {
 }
 
 
-class ParamHandler<T,U> implements IHandler<T> {
-  private readonly key: string;
+abstract class BaseParamHandler<T,U> implements IHandler<T> {
+  protected readonly key: keyof U;
 
   constructor(
-    private readonly validator: Validator<U>,
+    validator: Validator<U>,
     private readonly next: IHandler<T & U>
   ) {
-    const keys = Object.keys(validator);
+    const keys = keysOf(validator);
 
     if (keys.length !== 1) {
       throw new Error(`Expected one validator, got ${keys.length}`);
@@ -136,19 +147,74 @@ class ParamHandler<T,U> implements IHandler<T> {
       return false;
     }
 
-    const validationResult = this.validate(subpath[0]);
+    const {result, newSubpath} = this.validate(subpath);
 
-    if (!validationResult.success) {
+    if (!result.success) {
       return false;
     }
 
-    return await this.next.route(nav, Object.assign({}, params, validationResult.value), subpath.slice(1));
+    return await this.next.route(nav, Object.assign({}, params, result.value), newSubpath);
   }
 
-  private validate(arg: string): ValidationResult<U> {
+  protected abstract validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]};
+}
+
+
+export type StringValidator<T> = {
+  [K in keyof T]: (arg: string) => ValidationResult<T[K]>
+};
+
+
+class ParamHandler<T,U> extends BaseParamHandler<T,U> {
+  private readonly validator: Validator<U>;
+  constructor(
+    stringValidator: StringValidator<U>,
+    next: IHandler<T & U>
+  ) {
+    super(stringValidator, next);
+    this.validator
+
+    const validator: any = {};
+    validator[this.key] = isString(stringValidator[this.key]);
+    this.validator = validator as Validator<U>;
+  }
+
+  protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
     const obj: any = {};
-    obj[this.key] = arg;
-    return validate(obj, conformsTo(this.validator));
+    obj[this.key] = subpath[0];
+    return {
+      result: validate(obj, conformsTo(this.validator)),
+      newSubpath: subpath.slice(1)
+    };
+  }
+}
+
+
+export type ArrayValidator<T> = {
+  [K in keyof T]: (arg: Array<string>) => ValidationResult<T[K]>;
+};
+
+
+class MultiParamHandler<T,U> extends BaseParamHandler<T,U> {
+  private readonly validator: Validator<U>;
+  constructor(
+    arrayValidator: ArrayValidator<U>,
+    next: IHandler<T & U>
+  ) {
+    super(arrayValidator, next);
+
+    const validator: any = {};
+    validator[this.key] = isArray(eachItem(isString(), arrayValidator[this.key]));
+    this.validator = validator as Validator<U>;
+  }
+
+  protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj: any = {};
+    obj[this.key] = subpath;
+    return {
+      result: validate(obj, conformsTo(this.validator)),
+      newSubpath: []
+    };
   }
 }
 
@@ -387,19 +453,3 @@ export class Router extends BaseRouter<{}> {
     }
   }
 }
-
-const router = new Router({
-  navigatedEvent: new EventWithArg<Navigation>(),
-  setUrl: (nav: Navigation) => null,
-  back: () => null,
-  clearHistory: () => null
-});
-
-const subrouter = router.path('/test');
-subrouter.path('/foo').register((nav, params) => console.log('FOO', params));
-subrouter.path('/bar').register((nav, params) => console.log('BAR', params));
-router.navigate('/test/foo');
-
-router.register(() => console.log('NOT FOUND'));
-//router.navigate('/test/a/b/');
-//router.navigate('/test/a/b/c/');
