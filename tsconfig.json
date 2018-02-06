@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "typed-app-router/*": ["lib/*"],
+      "browser-cookies": ["types/browser-cookies"]
+    },
+    "target": "ES5",
+    "strict": true,
+    "lib": ["ES6", "DOM"]
+  }
+}

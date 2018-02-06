@@ -1,6 +1,6 @@
 {
   "name": "typed-app-router",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "TypeScript Web App Router",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "browser-cookies": "1.1.0",
-    "typed-event": "0.1.0"
+    "typed-event": "0.1.0",
+    "typed-validation": "0.7.5"
   }
 }

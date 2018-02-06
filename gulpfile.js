@@ -8,18 +8,7 @@ const gulp = require('gulp'),
 const srcDir = './lib';
 const outputDir = './dist';
 
-const tsProject = ts.createProject({
-  declaration: true,
-  baseUrl: '.',
-  paths: {
-    'typed-app-router/*': [srcDir + '/*'],
-    'browser-cookies': ['types/browser-cookies']
-  },
-  target: 'ES5',
-  strict: true,
-  noImplicitAny: true,
-  lib: ['ES6', 'DOM']
-}, ts.reporter.fullReporter(true));
+const tsProject = ts.createProject(require('./tsconfig').compilerOptions, ts.reporter.fullReporter(true));
 
 
 gulp.task('clean', function (cb) {
