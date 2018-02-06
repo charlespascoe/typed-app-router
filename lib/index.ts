@@ -1,6 +1,13 @@
 import { EventWithArg } from 'typed-event';
 import * as cookies from 'browser-cookies';
 import { PossiblyWeakMap } from './possibly-weak-map';
+import {
+  conformsTo,
+  isString,
+  validate,
+  ValidationResult,
+  Validator
+} from 'typed-validation';
 
 
 const FALLBACK_COOKIE_KEY = '__app_history__';
@@ -74,6 +81,14 @@ export abstract class BaseRouter<T> {
       }
     }));
   }
+
+  public param<U>(validator: Validator<U>): Subrouter<T & U> {
+    const subrouter = new Subrouter<T & U>();
+
+    this.handlers.push(new ParamHandler(validator, subrouter));
+
+    return subrouter;
+  }
 }
 
 
@@ -100,6 +115,44 @@ export class PathHandler<T> implements IHandler<T> {
 }
 
 
+class ParamHandler<T,U> implements IHandler<T> {
+  private readonly key: string;
+
+  constructor(
+    private readonly validator: Validator<U>,
+    private readonly next: IHandler<T & U>
+  ) {
+    const keys = Object.keys(validator);
+
+    if (keys.length !== 1) {
+      throw new Error(`Expected one validator, got ${keys.length}`);
+    }
+
+    this.key = keys[0];
+  }
+
+  public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
+    if (subpath.length === 0) {
+      return false;
+    }
+
+    const validationResult = this.validate(subpath[0]);
+
+    if (!validationResult.success) {
+      return false;
+    }
+
+    return await this.next.route(nav, Object.assign({}, params, validationResult.value), subpath.slice(1));
+  }
+
+  private validate(arg: string): ValidationResult<U> {
+    const obj: any = {};
+    obj[this.key] = arg;
+    return validate(obj, conformsTo(this.validator));
+  }
+}
+
+
 export class Subrouter<T> extends BaseRouter<T> implements IHandler<T> {
   public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
     for (const handler of this.handlers) {
@@ -117,6 +170,10 @@ class CallbackHandler<T> implements IHandler<T> {
   constructor(private callback: (nav: Navigation, params: T) => Promise<void>) { }
 
   public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
+    if (subpath.length !== 0) {
+      return false;
+    }
+
     await this.callback(nav, params);
     return true;
   }
