@@ -12,33 +12,30 @@ export function currentPath(): string {
 
 
 export class Navigation {
-  public extras: {[key: string]: any} = {};
-
   constructor(
-    public url: string,
-    public path: string,
-    public params: { [key: string]: string },
-    public query: { [key: string]: string },
-    public refs: { [key: string]: any } = {},
+    public readonly url: string,
+    public readonly path: string,
+    public readonly query: { [key: string]: string },
+    public readonly refs: { [key: string]: any } = {},
     public cancelled: boolean = false
   ) { }
 
-  static createFromUrl(url: string): Navigation {
+  public static createFromUrl(url: string): Navigation {
     url = encodeURI(url);
 
-    let path: string = '',
-        query: { [key: string]: string } = {};
+    let path: string = '';
+    const query: { [key: string]: string } = {};
 
     if (url.indexOf('?') >= 0) {
-      let parts = url.split('?', 2);
+      const parts = url.split('?', 2);
       path = parts[0] || '';
-      let queryString = parts[1] || '';
-      let queryPairs = queryString.split('&');
+      const queryString = parts[1] || '';
+      const queryPairs = queryString.split('&');
 
-      for (let queryPair of queryPairs) {
-        let splitPair = queryPair.split('=', 2),
-            key = splitPair[0] || '',
-            value = splitPair[1] || '';
+      for (const queryPair of queryPairs) {
+        const splitPair = queryPair.split('=', 2);
+        const key = splitPair[0] || '';
+        const value = splitPair[1] || '';
 
         query[decodeURIComponent(key)] = decodeURIComponent(value);
       }
@@ -46,166 +43,85 @@ export class Navigation {
       path = url;
     }
 
-    return new Navigation(url, path, {}, query);
-  }
-
-  clone(): Navigation {
-    return new Navigation(
-      this.url,
-      this.path,
-      Object.assign(this.params, {}),
-      Object.assign(this.query, {}),
-      Object.assign(this.refs, {}),
-      this.cancelled
-    );
-  }
-
-  addParams(params: { [key: string]: string }) {
-    this.params = Object.assign(this.params, params);
+    return new Navigation(url, path, query);
   }
 }
 
 
-export interface IHandler {
+export interface IHandler<T> {
   // Returns true if the handler has handled the navigation, false otherwise
-  route(nav: Navigation, subpath: string): Promise<boolean>;
+  route(nav: Navigation, params: T, subpath: string[]): Promise<boolean>;
 }
 
 
-const paramRegex = /:([a-z0-9_])+/gi;
+export abstract class BaseRouter<T> {
+  protected handlers: IHandler<T>[] = [];
 
+  public path(path: string): Subrouter<T> {
+    const subrouter = new Subrouter<T>();
 
-interface IPatternMatch {
-  params: { [key: string]: string } | null;
-  newSubpath: string | null;
-}
+    this.handlers.push(new PathHandler(path, subrouter));
 
-
-class PatternHandler implements IHandler {
-  private keys: string[];
-  private regex: RegExp;
-
-  constructor(path: string, private handler: IHandler, last: boolean) {
-    let pathRegex = path.replace(/\/*$/, '').replace(/^\/*/, '').replace('*', '.*').replace(paramRegex, '([a-zA-Z0-9\\-]+)');
-
-    this.keys = (path.match(paramRegex) || []).map(key => key.replace(/^:/, ''));
-    this.regex = new RegExp(`^/${pathRegex}${last ? '/?$' : ''}`);
+    return subrouter;
   }
 
-  public async route(nav: Navigation, subpath: string): Promise<boolean> {
-    let { params, newSubpath } = this.parseParams(subpath);
+  public register(callback: (nav: Navigation, params: T) => void | Promise<void>) {
+    this.handlers.push(new CallbackHandler<T>(async (nav, params) => {
+      const result = callback(nav, params);
 
-    if (params !== null && newSubpath !== null) {
-      let newNav = nav.clone();
+      if (result) {
+        await result;
+      }
+    }));
+  }
+}
 
-      newNav.addParams(params);
 
-      return await this.handler.route(newNav, newSubpath);
+export class PathHandler<T> implements IHandler<T> {
+  private readonly pathComponents: string[];
+
+  constructor(path: string, private readonly next: IHandler<T>) {
+    this.pathComponents = path.split('/').filter(component => component.length !== 0);
+  }
+
+  public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
+    if (subpath.length < this.pathComponents.length) {
+      return false;
+    }
+
+    for (let i = 0; i < this.pathComponents.length; i++) {
+      if (subpath[i] !== this.pathComponents[i]) {
+        return false;
+      }
+    }
+
+    return this.next.route(nav, params, subpath.slice(this.pathComponents.length));
+  }
+}
+
+
+export class Subrouter<T> extends BaseRouter<T> implements IHandler<T> {
+  public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
+    for (const handler of this.handlers) {
+      if (await handler.route(nav, params, subpath)) {
+        return true;
+      }
     }
 
     return false;
   }
-
-  private parseParams(subpath: string): IPatternMatch {
-    let match = this.regex.exec(subpath);
-
-    let result: IPatternMatch = {
-      params: null,
-      newSubpath: null
-    };
-
-    if (match !== null) {
-      result.params = {};
-
-      for (let i in this.keys) {
-        result.params[this.keys[i]] = match[parseInt(i) + 1];
-      }
-
-      result.newSubpath = subpath.substr(match[0].length) || '/';
-    }
-
-    return result;
-  }
 }
 
 
-class CallbackHandler implements IHandler {
-  constructor(private callback: (nav: Navigation) => Promise<void>) { }
+class CallbackHandler<T> implements IHandler<T> {
+  constructor(private callback: (nav: Navigation, params: T) => Promise<void>) { }
 
-  public async route(nav: Navigation, subpath: string): Promise<boolean> {
-    await this.callback(nav);
+  public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
+    await this.callback(nav, params);
     return true;
   }
 }
 
-
-export class RouterHandler implements IHandler {
-  public next: RouterHandler | null = null;
-
-  constructor(private handler: IHandler) { }
-
-  public async route(nav: Navigation, subpath: string): Promise<boolean> {
-    if (await this.handler.route(nav, subpath)) {
-      return true;
-    }
-
-    if (this.next !== null) {
-      return await this.next.route(nav, subpath);
-    }
-
-    return false;
-  }
-}
-
-
-export abstract class BaseRouter {
-  protected rootRouterHandler: RouterHandler | null = null;
-
-  protected lastRouterHandler: RouterHandler | null = null;
-
-  public register(path: string, handler: (nav: Navigation) => void) {
-    this.registerAsync(path, async (nav) => handler(nav));
-  }
-
-  public registerAsync(path: string, handler: (nav: Navigation) => Promise<void>) {
-    this.addRouterHandler(
-      new RouterHandler(
-        new PatternHandler(
-          path,
-          new CallbackHandler(handler),
-          true
-        )
-      )
-    );
-  }
-
-  public subroute(path: string): Subrouter {
-    let subrouter = new Subrouter();
-    this.addRouterHandler(new RouterHandler(new PatternHandler(path, subrouter, false)));
-    return subrouter;
-  }
-
-  protected addRouterHandler(routerHandler: RouterHandler) {
-    if (this.lastRouterHandler !== null) {
-      this.lastRouterHandler.next = routerHandler;
-    } else {
-      this.rootRouterHandler = routerHandler;
-    }
-
-    this.lastRouterHandler = routerHandler;
-  }
-}
-
-
-export class Subrouter extends BaseRouter implements IHandler {
-  public async route(nav: Navigation, subpath: string): Promise<boolean> {
-    if (this.rootRouterHandler !== null) {
-      return await this.rootRouterHandler.route(nav, subpath);
-    } else {
-      return false;
-    }
-  }
-}
 
 
 export abstract class BrowserApi {
@@ -326,7 +242,7 @@ export class FallbackBrowserApi extends BrowserApi {
 }
 
 
-export class Router extends BaseRouter {
+export class Router extends BaseRouter<{}> {
   public readonly navigatedEvent = new EventWithArg<Navigation>();
 
   private _currentNav: Navigation | null = null;
@@ -366,7 +282,7 @@ export class Router extends BaseRouter {
   }
 
   public async navigate(url: Navigation | string): Promise<boolean> {
-    if (this.rootRouterHandler === null) return false;
+    if (this.handlers.length === 0) return false;
 
     if (this.nextNav !== null) {
       this.nextNav.cancelled = true;
@@ -381,7 +297,7 @@ export class Router extends BaseRouter {
     }
 
     this.nextNav = nav;
-    let handled = await this.rootRouterHandler.route(nav, nav.path);
+    let handled = await this.route(nav);
     this.nextNav = null;
 
     if (handled && !nav.cancelled) {
@@ -390,6 +306,18 @@ export class Router extends BaseRouter {
     }
 
     return handled;
+  }
+
+  private async route(nav: Navigation): Promise<boolean> {
+    const pathComponents = nav.path.split('/').filter(component => component.length !== 0);
+
+    for (const handler of this.handlers) {
+      if (await handler.route(nav, {}, pathComponents)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   public back() {
@@ -402,3 +330,19 @@ export class Router extends BaseRouter {
     }
   }
 }
+
+const router = new Router({
+  navigatedEvent: new EventWithArg<Navigation>(),
+  setUrl: (nav: Navigation) => null,
+  back: () => null,
+  clearHistory: () => null
+});
+
+const subrouter = router.path('/test');
+subrouter.path('/foo').register((nav, params) => console.log('FOO', params));
+subrouter.path('/bar').register((nav, params) => console.log('BAR', params));
+router.navigate('/test/foo');
+
+router.register(() => console.log('NOT FOUND'));
+//router.navigate('/test/a/b/');
+//router.navigate('/test/a/b/c/');
