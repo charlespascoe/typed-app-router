@@ -85,7 +85,7 @@ export abstract class BaseRouter<T> {
     }, options));
   }
 
-  public param<U>(validator: StringValidator<U>): Subrouter<T & U> {
+  public param<U>(validator: Validator<U>): Subrouter<T & U> {
     const subrouter = new Subrouter<T & U>();
 
     this.handlers.push(new ParamHandler(validator, subrouter));
@@ -160,23 +160,14 @@ abstract class BaseParamHandler<T,U> implements IHandler<T> {
 }
 
 
-export type StringValidator<T> = {
-  [K in keyof T]: (arg: string) => ValidationResult<T[K]>
-};
-
-
 class ParamHandler<T,U> extends BaseParamHandler<T,U> {
   private readonly validator: Validator<U>;
   constructor(
-    stringValidator: StringValidator<U>,
+    validator: Validator<U>,
     next: IHandler<T & U>
   ) {
-    super(stringValidator, next);
-    this.validator
-
-    const validator: any = {};
-    validator[this.key] = isString(stringValidator[this.key]);
-    this.validator = validator as Validator<U>;
+    super(validator, next);
+    this.validator =  validator
   }
 
   protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
