@@ -75,14 +75,14 @@ export abstract class BaseRouter<T> {
     return subrouter;
   }
 
-  public register(callback: (nav: Navigation, params: T) => void | Promise<void>) {
+  public register(callback: (nav: Navigation, params: T) => void | Promise<void>, options: Partial<ICallbackHandlerOptions> = {}) {
     this.handlers.push(new CallbackHandler<T>(async (nav, params) => {
       const result = callback(nav, params);
 
       if (result) {
         await result;
       }
-    }));
+    }, options));
   }
 
   public param<U>(validator: StringValidator<U>): Subrouter<T & U> {
@@ -232,11 +232,27 @@ export class Subrouter<T> extends BaseRouter<T> implements IHandler<T> {
 }
 
 
+export interface ICallbackHandlerOptions {
+  ignoreAdditionalPath: boolean;
+}
+
+
 class CallbackHandler<T> implements IHandler<T> {
-  constructor(private callback: (nav: Navigation, params: T) => Promise<void>) { }
+  private readonly callback: (nav: Navigation, params: T) => Promise<void>;
+  private readonly options: ICallbackHandlerOptions;
+  constructor(
+    callback: (nav: Navigation, params: T) => Promise<void>,
+    options: Partial<ICallbackHandlerOptions>
+  ) {
+    this.callback = callback;
+    this.options = {
+      ignoreAdditionalPath: false,
+      ...options
+    };
+  }
 
   public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
-    if (subpath.length !== 0) {
+    if (!this.options.ignoreAdditionalPath && subpath.length !== 0) {
       return false;
     }
 
