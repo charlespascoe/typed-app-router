@@ -93,6 +93,14 @@ export abstract class BaseRouter<T> {
     return subrouter;
   }
 
+  public query<U>(queryKey: string, validator: Validator<U>): Subrouter<T & U> {
+    const subrouter = new Subrouter<T & U>();
+
+    this.handlers.push(new QueryHandler(queryKey, validator, subrouter));
+
+    return subrouter;
+  }
+
   public multiparam<U>(validator: ArrayValidator<U>): Subrouter<T & U> {
     const subrouter = new Subrouter<T & U>();
 
@@ -171,6 +179,32 @@ class ParamHandler<T,U> extends BaseParamHandler<T,U> {
     return {
       result: validate(obj, conformsTo(this.validator)),
       newSubpath: subpath.slice(1)
+    };
+  }
+}
+
+
+class QueryHandler<T,U> extends BaseParamHandler<T,U> {
+  private queryKey: string;
+
+  private readonly validator: Validator<U>;
+
+  constructor(
+    queryKey: string,
+    validator: Validator<U>,
+    next: IHandler<T & U>
+  ) {
+    super(validator, next);
+    this.queryKey = queryKey;
+    this.validator =  validator
+  }
+
+  protected validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj = {[this.key]: nav.query[this.queryKey]};
+
+    return {
+      result: validate(obj, conformsTo(this.validator)),
+      newSubpath: subpath
     };
   }
 }
