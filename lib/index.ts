@@ -143,11 +143,7 @@ abstract class BaseParamHandler<T,U> implements IHandler<T> {
   }
 
   public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
-    if (subpath.length === 0) {
-      return false;
-    }
-
-    const {result, newSubpath} = this.validate(subpath);
+    const {result, newSubpath} = this.validate(nav, subpath);
 
     if (!result.success) {
       return false;
@@ -156,7 +152,7 @@ abstract class BaseParamHandler<T,U> implements IHandler<T> {
     return await this.next.route(nav, Object.assign({}, params, result.value), newSubpath);
   }
 
-  protected abstract validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]};
+  protected abstract validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]};
 }
 
 
@@ -170,9 +166,8 @@ class ParamHandler<T,U> extends BaseParamHandler<T,U> {
     this.validator =  validator
   }
 
-  protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
-    const obj: any = {};
-    obj[this.key] = subpath[0];
+  protected validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj = {[this.key]: subpath[0]};
     return {
       result: validate(obj, conformsTo(this.validator)),
       newSubpath: subpath.slice(1)
@@ -194,14 +189,11 @@ class MultiParamHandler<T,U> extends BaseParamHandler<T,U> {
   ) {
     super(arrayValidator, next);
 
-    const validator: any = {};
-    validator[this.key] = isArray(eachItem(isString(), arrayValidator[this.key]));
-    this.validator = validator as Validator<U>;
+    this.validator = {[this.key]: isArray(eachItem(isString(), arrayValidator[this.key]))} as Validator<U>;
   }
 
-  protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
-    const obj: any = {};
-    obj[this.key] = subpath;
+  protected validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj = {[this.key]: subpath};
     return {
       result: validate(obj, conformsTo(this.validator)),
       newSubpath: []
