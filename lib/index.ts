@@ -21,18 +21,19 @@ export function currentPath(): string {
 }
 
 
-export class Navigation {
-  constructor(
-    public readonly url: string,
-    public readonly path: string,
-    public readonly query: { [key: string]: string },
-    public readonly refs: { [key: string]: any } = {},
-    public cancelled: boolean = false
-  ) { }
+export class Path {
+  public readonly components: ReadonlyArray<string>;
+  public readonly query: {readonly [key: string]: string};
+  public get encodedPath() {
+    return '/' + this.components.map(component => encodeURIComponent(component)).join('/');
+  }
 
-  public static createFromUrl(url: string): Navigation {
-    url = encodeURI(url);
+  constructor(path: string[] | ReadonlyArray<string>, query: {[key: string]: string}) {
+    this.components = Object.isFrozen(path) ? path as ReadonlyArray<string> : Object.freeze(path as string[]);
+    this.query = Object.freeze(query);
+  }
 
+  public static fromString(url: string): Path {
     let path: string = '';
     const query: { [key: string]: string } = {};
 
@@ -53,8 +54,37 @@ export class Navigation {
       path = url;
     }
 
-    return new Navigation(url, path, query);
+    return new Path(path.split('/').filter(component => component.length > 0).map(component => decodeURIComponent(component)), query);
   }
+
+  public toString() {
+    if (Object.keys(this.query).length === 0) {
+      return this.encodedPath;
+    }
+
+    return this.encodedPath + '?' + Object.keys(this.query)
+      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(this.query[key])}`)
+      .join('&');
+  }
+}
+
+
+export class Navigation {
+  constructor(
+    public readonly url: string,
+    public readonly path: string,
+    public readonly query: { [key: string]: string },
+    public readonly refs: { [key: string]: any } = {},
+    public cancelled: boolean = false
+  ) { }
+
+  public static createFromUrl(url: string): Navigation {
+    const path = Path.fromString(url);
+    //url = encodeURI(url);
+
+    return new Navigation(url, path.encodedPath, path.query);
+  }
+
 }
 
 
