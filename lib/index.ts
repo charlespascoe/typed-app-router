@@ -21,18 +21,19 @@ export function currentPath(): string {
 }
 
 
-export class Navigation {
-  constructor(
-    public readonly url: string,
-    public readonly path: string,
-    public readonly query: { [key: string]: string },
-    public readonly refs: { [key: string]: any } = {},
-    public cancelled: boolean = false
-  ) { }
+export class Path {
+  public readonly components: ReadonlyArray<string>;
+  public readonly query: {readonly [key: string]: string};
+  public get encodedPath() {
+    return '/' + this.components.map(component => encodeURIComponent(component)).join('/');
+  }
 
-  public static createFromUrl(url: string): Navigation {
-    url = encodeURI(url);
+  constructor(path: string[] | ReadonlyArray<string>, query: {[key: string]: string}) {
+    this.components = Object.isFrozen(path) ? path as ReadonlyArray<string> : Object.freeze(path as string[]);
+    this.query = Object.freeze(query);
+  }
 
+  public static fromString(url: string): Path {
     let path: string = '';
     const query: { [key: string]: string } = {};
 
@@ -53,8 +54,41 @@ export class Navigation {
       path = url;
     }
 
-    return new Navigation(url, path, query);
+    return new Path(path.split('/').filter(component => component.length > 0).map(component => decodeURIComponent(component)), query);
   }
+
+  public addQuery(query: {[key: string]: string}) {
+    return new Path(this.components, {...this.query, ...query});
+  }
+
+  public toString() {
+    if (Object.keys(this.query).length === 0) {
+      return this.encodedPath;
+    }
+
+    return this.encodedPath + '?' + Object.keys(this.query)
+      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(this.query[key])}`)
+      .join('&');
+  }
+}
+
+
+export class Navigation {
+  constructor(
+    public readonly url: string,
+    public readonly path: string,
+    public readonly query: { [key: string]: string },
+    public readonly refs: { [key: string]: any } = {},
+    public cancelled: boolean = false
+  ) { }
+
+  public static createFromUrl(url: string): Navigation {
+    const path = Path.fromString(url);
+    //url = encodeURI(url);
+
+    return new Navigation(url, path.encodedPath, path.query);
+  }
+
 }
 
 
@@ -75,20 +109,28 @@ export abstract class BaseRouter<T> {
     return subrouter;
   }
 
-  public register(callback: (nav: Navigation, params: T) => void | Promise<void>) {
+  public register(callback: (nav: Navigation, params: T) => void | Promise<void>, options: Partial<ICallbackHandlerOptions> = {}) {
     this.handlers.push(new CallbackHandler<T>(async (nav, params) => {
       const result = callback(nav, params);
 
       if (result) {
         await result;
       }
-    }));
+    }, options));
   }
 
-  public param<U>(validator: StringValidator<U>): Subrouter<T & U> {
+  public param<U>(validator: Validator<U>): Subrouter<T & U> {
     const subrouter = new Subrouter<T & U>();
 
     this.handlers.push(new ParamHandler(validator, subrouter));
+
+    return subrouter;
+  }
+
+  public query<U>(queryKey: string, validator: Validator<U>): Subrouter<T & U> {
+    const subrouter = new Subrouter<T & U>();
+
+    this.handlers.push(new QueryHandler(queryKey, validator, subrouter));
 
     return subrouter;
   }
@@ -143,11 +185,7 @@ abstract class BaseParamHandler<T,U> implements IHandler<T> {
   }
 
   public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
-    if (subpath.length === 0) {
-      return false;
-    }
-
-    const {result, newSubpath} = this.validate(subpath);
+    const {result, newSubpath} = this.validate(nav, subpath);
 
     if (!result.success) {
       return false;
@@ -156,35 +194,51 @@ abstract class BaseParamHandler<T,U> implements IHandler<T> {
     return await this.next.route(nav, Object.assign({}, params, result.value), newSubpath);
   }
 
-  protected abstract validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]};
+  protected abstract validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]};
 }
-
-
-export type StringValidator<T> = {
-  [K in keyof T]: (arg: string) => ValidationResult<T[K]>
-};
 
 
 class ParamHandler<T,U> extends BaseParamHandler<T,U> {
   private readonly validator: Validator<U>;
   constructor(
-    stringValidator: StringValidator<U>,
+    validator: Validator<U>,
     next: IHandler<T & U>
   ) {
-    super(stringValidator, next);
-    this.validator
-
-    const validator: any = {};
-    validator[this.key] = isString(stringValidator[this.key]);
-    this.validator = validator as Validator<U>;
+    super(validator, next);
+    this.validator =  validator
   }
 
-  protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
-    const obj: any = {};
-    obj[this.key] = subpath[0];
+  protected validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj = {[this.key]: subpath[0]};
     return {
       result: validate(obj, conformsTo(this.validator)),
       newSubpath: subpath.slice(1)
+    };
+  }
+}
+
+
+class QueryHandler<T,U> extends BaseParamHandler<T,U> {
+  private queryKey: string;
+
+  private readonly validator: Validator<U>;
+
+  constructor(
+    queryKey: string,
+    validator: Validator<U>,
+    next: IHandler<T & U>
+  ) {
+    super(validator, next);
+    this.queryKey = queryKey;
+    this.validator =  validator
+  }
+
+  protected validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj = {[this.key]: nav.query[this.queryKey]};
+
+    return {
+      result: validate(obj, conformsTo(this.validator)),
+      newSubpath: subpath
     };
   }
 }
@@ -203,14 +257,11 @@ class MultiParamHandler<T,U> extends BaseParamHandler<T,U> {
   ) {
     super(arrayValidator, next);
 
-    const validator: any = {};
-    validator[this.key] = isArray(eachItem(isString(), arrayValidator[this.key]));
-    this.validator = validator as Validator<U>;
+    this.validator = {[this.key]: isArray(eachItem(isString(), arrayValidator[this.key]))} as Validator<U>;
   }
 
-  protected validate(subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
-    const obj: any = {};
-    obj[this.key] = subpath;
+  protected validate(nav: Navigation, subpath: string[]): {result: ValidationResult<U>, newSubpath: string[]} {
+    const obj = {[this.key]: subpath};
     return {
       result: validate(obj, conformsTo(this.validator)),
       newSubpath: []
@@ -232,11 +283,27 @@ export class Subrouter<T> extends BaseRouter<T> implements IHandler<T> {
 }
 
 
+export interface ICallbackHandlerOptions {
+  ignoreAdditionalPath: boolean;
+}
+
+
 class CallbackHandler<T> implements IHandler<T> {
-  constructor(private callback: (nav: Navigation, params: T) => Promise<void>) { }
+  private readonly callback: (nav: Navigation, params: T) => Promise<void>;
+  private readonly options: ICallbackHandlerOptions;
+  constructor(
+    callback: (nav: Navigation, params: T) => Promise<void>,
+    options: Partial<ICallbackHandlerOptions>
+  ) {
+    this.callback = callback;
+    this.options = {
+      ignoreAdditionalPath: false,
+      ...options
+    };
+  }
 
   public async route(nav: Navigation, params: T, subpath: string[]): Promise<boolean> {
-    if (subpath.length !== 0) {
+    if (!this.options.ignoreAdditionalPath && subpath.length !== 0) {
       return false;
     }
 
