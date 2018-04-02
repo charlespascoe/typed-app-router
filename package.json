@@ -1,6 +1,6 @@
 {
   "name": "typed-app-router",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript Web App Router",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
