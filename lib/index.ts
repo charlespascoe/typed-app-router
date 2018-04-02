@@ -57,6 +57,10 @@ export class Path {
     return new Path(path.split('/').filter(component => component.length > 0).map(component => decodeURIComponent(component)), query);
   }
 
+  public addQuery(query: {[key: string]: string}) {
+    return new Path(this.components, {...this.query, ...query});
+  }
+
   public toString() {
     if (Object.keys(this.query).length === 0) {
       return this.encodedPath;
